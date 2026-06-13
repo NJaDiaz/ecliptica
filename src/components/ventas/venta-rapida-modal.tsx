@@ -1,0 +1,162 @@
+"use client";
+
+import { useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { Producto, MetodoPago } from "@/types";
+import { formatCurrency, METODOS_PAGO } from "@/lib/utils";
+import { X, ShoppingCart, Minus, Plus } from "lucide-react";
+import { toast } from "sonner";
+
+type Props = {
+  producto: Producto;
+  onClose: () => void;
+  onSave: () => void;
+};
+
+const METODOS: MetodoPago[] = ["efectivo", "transferencia", "mercado_pago_qr", "debito", "credito"];
+
+export default function VentaRapidaModal({ producto, onClose, onSave }: Props) {
+  const supabase = createClient();
+  const [cantidad, setCantidad] = useState(1);
+  const [metodo, setMetodo] = useState<MetodoPago>("efectivo");
+  const [saving, setSaving] = useState(false);
+
+  const total = cantidad * producto.precio_venta;
+  const costo = cantidad * producto.costo_compra;
+  const ganancia = total - costo;
+
+  async function handleVenta() {
+    if (cantidad > producto.stock_actual) {
+      toast.error(`Stock insuficiente. Disponible: ${producto.stock_actual}`);
+      return;
+    }
+    setSaving(true);
+    // Registrar venta
+    const { error: ventaError } = await supabase.from("ventas").insert({
+      fecha: new Date().toISOString(),
+      producto_id: producto.id,
+      cantidad,
+      precio_unitario: producto.precio_venta,
+      total,
+      metodo_pago: metodo,
+      costo_total: costo,
+      ganancia,
+    });
+    if (ventaError) {
+      toast.error("Error al registrar venta");
+      setSaving(false);
+      return;
+    }
+    // Descontar stock
+    const { error: stockError } = await supabase.from("productos")
+      .update({ stock_actual: producto.stock_actual - cantidad })
+      .eq("id", producto.id);
+    if (stockError) {
+      toast.error("Venta registrada pero error al actualizar stock");
+    } else {
+      toast.success(`Venta registrada — ${formatCurrency(total)}`);
+    }
+    onSave();
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative w-full sm:max-w-sm bg-card rounded-t-2xl sm:rounded-2xl border border-border">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShoppingCart size={18} className="text-primary" />
+            <h2 className="font-bold text-foreground">Registrar venta</h2>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-secondary">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {/* Producto info */}
+          <div className="flex items-center gap-3 p-3 bg-secondary rounded-xl">
+            <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center overflow-hidden flex-shrink-0">
+              {producto.imagen_url ? (
+                <img src={producto.imagen_url} alt={producto.nombre} className="w-full h-full object-cover" />
+              ) : (
+                <ShoppingCart size={18} className="text-muted-foreground/40" />
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-foreground text-sm truncate">{producto.nombre}</p>
+              <p className="text-xs text-muted-foreground">Stock: {producto.stock_actual} u.</p>
+            </div>
+            <div className="text-right">
+              <p className="font-bold text-primary text-sm">{formatCurrency(producto.precio_venta)}</p>
+              <p className="text-[10px] text-muted-foreground">por unidad</p>
+            </div>
+          </div>
+
+          {/* Cantidad */}
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-2">Cantidad</label>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setCantidad(c => Math.max(1, c - 1))}
+                className="w-10 h-10 rounded-xl border border-border flex items-center justify-center hover:bg-secondary transition-all"
+              ><Minus size={16} /></button>
+              <input
+                type="number"
+                value={cantidad}
+                onChange={e => setCantidad(Math.max(1, Math.min(producto.stock_actual, parseInt(e.target.value) || 1)))}
+                className="flex-1 text-center text-xl font-bold py-2 rounded-xl border border-input bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+              <button
+                onClick={() => setCantidad(c => Math.min(producto.stock_actual, c + 1))}
+                className="w-10 h-10 rounded-xl border border-border flex items-center justify-center hover:bg-secondary transition-all"
+              ><Plus size={16} /></button>
+            </div>
+          </div>
+
+          {/* Método de pago */}
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-2">Método de pago</label>
+            <div className="grid grid-cols-2 gap-2">
+              {METODOS.map(m => (
+                <button
+                  key={m}
+                  onClick={() => setMetodo(m)}
+                  className={`py-2.5 px-3 rounded-xl text-xs font-medium transition-all ${metodo === m ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground hover:bg-muted"}`}
+                >{METODOS_PAGO[m]}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Resumen */}
+          <div className="bg-accent rounded-xl p-3 space-y-1.5">
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Total</span>
+              <span className="font-bold text-foreground text-base">{formatCurrency(total)}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">Ganancia estimada</span>
+              <span className="font-semibold text-green-600 dark:text-green-400">+{formatCurrency(ganancia)}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">Método</span>
+              <span className="text-foreground">{METODOS_PAGO[metodo]}</span>
+            </div>
+          </div>
+
+          {/* Buttons */}
+          <div className="flex gap-3">
+            <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-border text-sm font-medium hover:bg-secondary transition-all">
+              Cancelar
+            </button>
+            <button onClick={handleVenta} disabled={saving} className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50">
+              {saving ? "Guardando..." : "Confirmar venta"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
