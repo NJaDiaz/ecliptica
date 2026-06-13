@@ -1,8 +1,16 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+type CookieToSet = {
+  name: string;
+  value: string;
+  options?: Record<string, unknown>;
+};
+
 export async function middleware(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request });
+  let supabaseResponse = NextResponse.next({
+    request,
+  });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -12,43 +20,49 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
-          supabaseResponse = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options as any)
-          );
+
+        setAll(cookiesToSet: CookieToSet[]) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            request.cookies.set(name, value);
+
+            supabaseResponse.cookies.set(
+              name,
+              value,
+              options as any
+            );
+          });
         },
       },
     }
   );
 
-  // IMPORTANTE: usar getUser() para validar sesión en el servidor
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   const pathname = request.nextUrl.pathname;
+
   const isLoginPage = pathname === "/login";
   const isAuthRoute = pathname.startsWith("/auth");
+
   const isPublicAsset =
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     /\.(?:svg|png|jpg|jpeg|gif|webp|ico)$/.test(pathname);
 
-  // Si no está autenticado y no está en /login ni en /auth → redirigir a /login
+  // Si NO está autenticado y quiere entrar a cualquier página protegida
   if (!user && !isLoginPage && !isAuthRoute && !isPublicAsset) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
+
     return NextResponse.redirect(loginUrl);
   }
 
-  // Si está autenticado y va a /login o a / → redirigir a /dashboard
+  // Si YA está autenticado y entra a /login o /
   if (user && (isLoginPage || pathname === "/")) {
     const dashboardUrl = request.nextUrl.clone();
     dashboardUrl.pathname = "/dashboard";
+
     return NextResponse.redirect(dashboardUrl);
   }
 
