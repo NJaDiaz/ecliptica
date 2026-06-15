@@ -8,7 +8,7 @@ type CookieToSet = {
 };
 
 export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({
+  let supabaseResponse = NextResponse.next({
     request,
   });
 
@@ -20,18 +20,53 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
+
         setAll(cookiesToSet: CookieToSet[]) {
           cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options as any);
+            request.cookies.set(name, value);
+
+            supabaseResponse.cookies.set(
+              name,
+              value,
+              options as any
+            );
           });
         },
       },
     }
   );
 
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  return response;
+  const pathname = request.nextUrl.pathname;
+
+  const isLoginPage = pathname === "/login";
+  const isAuthRoute = pathname.startsWith("/auth");
+
+  const isPublicAsset =
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/favicon") ||
+    /\.(?:svg|png|jpg|jpeg|gif|webp|ico)$/.test(pathname);
+
+  // Si NO está autenticado y quiere entrar a cualquier página protegida
+  if (!user && !isLoginPage && !isAuthRoute && !isPublicAsset) {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/login";
+
+    return NextResponse.redirect(loginUrl);
+  }
+
+  // Si YA está autenticado y entra a /login o /
+  if (user && (isLoginPage || pathname === "/")) {
+    const dashboardUrl = request.nextUrl.clone();
+    dashboardUrl.pathname = "/dashboard";
+
+    return NextResponse.redirect(dashboardUrl);
+  }
+
+  return supabaseResponse;
 }
 
 export const config = {
